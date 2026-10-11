@@ -332,6 +332,17 @@ std::vector<u8> GetIdTokenBytes(Core::System& system) {
     return cached;
 }
 
+// Titles read the token as a C string, so zero the rest of their buffer instead of leaving stale bytes after it.
+void WriteIdToken(HLERequestContext& ctx, const std::vector<u8>& token) {
+    const std::size_t capacity = ctx.GetWriteBufferSize();
+    if (capacity == 0) {
+        return;
+    }
+    std::vector<u8> out(capacity, 0);
+    std::memcpy(out.data(), token.data(), std::min(token.size(), capacity));
+    ctx.WriteBuffer(out);
+}
+
 } // Anonymous namespace
 
 // Thumbnails are hard coded to be at least this size
@@ -947,7 +958,7 @@ public:
         LOG_INFO(Service_ACC, "[Nextendo] Providing BAAS ID token in async interface ({} bytes)",
                  token_bytes.size());
 
-        ctx.WriteBuffer(token_bytes);
+        WriteIdToken(ctx, token_bytes);
 
         IPC::ResponseBuilder rb{ctx, 3};
         rb.Push(ResultSuccess);
@@ -1346,7 +1357,7 @@ private:
         const std::vector<u8> token_bytes = GetIdTokenBytes(system);
         LOG_INFO(Service_ACC, "[Nextendo] Providing BAAS ID token ({} bytes)", token_bytes.size());
 
-        ctx.WriteBuffer(token_bytes);
+        WriteIdToken(ctx, token_bytes);
 
         IPC::ResponseBuilder rb{ctx, 4};
         rb.Push(ResultSuccess);

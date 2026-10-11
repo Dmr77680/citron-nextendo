@@ -199,7 +199,17 @@ constexpr std::array<std::span<const u8>, 1> kXenobladeXPatches{{kXenobladeXPatc
 
 constexpr std::array<std::span<const u8>, 1> kMpj230Patches{{kMpjCertificate230}};
 
-constexpr std::array<KnownBuild, 13> kKnownBuilds{{
+// Monster Hunter Rise 16.0.2: Z-A's three checks in its older NPLN SDK, same instructions.
+constexpr std::array<u8, 39> kMonsterHunterRisePatchesData{{
+    0x49, 0x50, 0x53, 0x33, 0x32,
+    0x02, 0x03, 0x3C, 0x04, 0x00, 0x04, 0x2A, 0x00, 0x80, 0x52,
+    0x02, 0x03, 0x2F, 0x28, 0x00, 0x04, 0x1F, 0x20, 0x03, 0xD5,
+    0x02, 0x03, 0x2F, 0xE8, 0x00, 0x04, 0x1F, 0x20, 0x03, 0xD5,
+    0x45, 0x45, 0x4F, 0x46,
+}};
+constexpr std::array<std::span<const u8>, 1> kMonsterHunterRisePatches{{kMonsterHunterRisePatchesData}};
+
+constexpr std::array<KnownBuild, 14> kKnownBuilds{{
     {"6830B3A12406CB4716FEC5ADDC35D3E2DC92D212", kSplatoon3PeerPatches},
     {"726D2B882DD9EF10F4A9D73EED088740630FB6C8", kSplatoon3CertOnlyPatches},
     {"28C4287AEE36F7499DA60F3E68B54C70DA382D75", kSplatoon3PeerPatches},
@@ -213,6 +223,7 @@ constexpr std::array<KnownBuild, 13> kKnownBuilds{{
     {"B1F12FD919EAE86AB8A978317677E64BCE443D1F", kPokemonZaPatches}, // Legends: Z-A 2.0.2
     {"EC4ED46BBC4A9EBBE7CE0AF7A4A8EBBC09E5724A", kXenobladeXPatches}, // Xenoblade X 2.0.0
     {"D70CE1726C979E45ED4200E9C2B23B2A258FDC18", kMpj230Patches}, // Jamboree 2.3.0
+    {"C9A3DD7702075ECD90101F45553895822804D38F", kMonsterHunterRisePatches}, // MH Rise 16.0.2
 }};
 
 FileSys::VirtualFile MakeIpsFile(std::span<const u8> bytes) {

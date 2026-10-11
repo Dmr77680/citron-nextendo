@@ -37,6 +37,16 @@ constexpr std::array<u8, 29> kPeerHostnameFix{{
     0x45, 0x45, 0x4F, 0x46, // "EEOF"
 }};
 
+// Super Mario Party Jamboree 2.3.0, build D70CE1726C979E45ED4200E9C2B23B2A258FDC18.
+// Selects the gRPC certificate verification callback used by the tested client.
+// Flat 0xAD38BC: LDRB W10,[X21,#0x38] -> MOV W10,#1; IPS includes the NSO header.
+constexpr std::array<u8, 19> kMpjCertificate230{{
+    0x49, 0x50, 0x53, 0x33, 0x32,
+    0x00, 0xAD, 0x39, 0xBC, 0x00, 0x04,
+    0x2A, 0x00, 0x80, 0x52,
+    0x45, 0x45, 0x4F, 0x46,
+}};
+
 // Super Mario Bros. Wonder v1.2.1, build FF773E90972D544EB79406EAA65396D53C43EFB9.
 constexpr std::array<u8, 19> kCertificateWonder121{{
     0x49, 0x50, 0x53, 0x33, 0x32,
@@ -187,7 +197,9 @@ constexpr std::array<u8, 39> kXenobladeXPatchesData{{
 }};
 constexpr std::array<std::span<const u8>, 1> kXenobladeXPatches{{kXenobladeXPatchesData}};
 
-constexpr std::array<KnownBuild, 12> kKnownBuilds{{
+constexpr std::array<std::span<const u8>, 1> kMpj230Patches{{kMpjCertificate230}};
+
+constexpr std::array<KnownBuild, 13> kKnownBuilds{{
     {"6830B3A12406CB4716FEC5ADDC35D3E2DC92D212", kSplatoon3PeerPatches},
     {"726D2B882DD9EF10F4A9D73EED088740630FB6C8", kSplatoon3CertOnlyPatches},
     {"28C4287AEE36F7499DA60F3E68B54C70DA382D75", kSplatoon3PeerPatches},
@@ -200,6 +212,7 @@ constexpr std::array<KnownBuild, 12> kKnownBuilds{{
     {"421C5411B487EB4D049DD065FEC9547773E8E598", kPokemonSvPatches}, // Scarlet 4.0.0
     {"B1F12FD919EAE86AB8A978317677E64BCE443D1F", kPokemonZaPatches}, // Legends: Z-A 2.0.2
     {"EC4ED46BBC4A9EBBE7CE0AF7A4A8EBBC09E5724A", kXenobladeXPatches}, // Xenoblade X 2.0.0
+    {"D70CE1726C979E45ED4200E9C2B23B2A258FDC18", kMpj230Patches}, // Jamboree 2.3.0
 }};
 
 FileSys::VirtualFile MakeIpsFile(std::span<const u8> bytes) {

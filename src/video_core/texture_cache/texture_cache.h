@@ -1550,6 +1550,9 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
             gpu_addr = solution->gpu_addr;
             cpu_addr = solution->cpu_addr;
             new_info.resources = solution->resources;
+            if (solution->depth != 0) {
+                new_info.size.depth = solution->depth;
+            }
             if (new_info.resources.layers > 1) {
                 // The union may have raised layers above 1 from an info whose stride was
                 // never set (valid when layers == 1); CalculateGuestSizeInBytes needs a

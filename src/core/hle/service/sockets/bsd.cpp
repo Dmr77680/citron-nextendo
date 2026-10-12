@@ -930,7 +930,7 @@ void BSD::Recv(HLERequestContext& ctx) {
     const s32 fd = rp.Pop<s32>();
     const u32 flags = rp.Pop<u32>();
 
-    LOG_DEBUG(Service, "called. fd={} flags=0x{:x} len={}", fd, flags, ctx.GetWriteBufferSize());
+    LOG_TRACE(Service, "called. fd={} flags=0x{:x} len={}", fd, flags, ctx.GetWriteBufferSize());
 
     ExecuteWork(ctx, RecvWork{
                          .fd = fd,

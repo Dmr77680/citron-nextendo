@@ -49,6 +49,8 @@ inline const std::unordered_map<u64, std::string>& Table() {
         {0x0100a7c01b792000, "1.1.1.0"},     // Minecraft Dungeons II
         {0x0100b3f000be2000, "1.3.3"},       // Pokken Tournament DX
         {0x0100de600beee000, "1.6.1"},       // Saints Row: The Third - The Full Package
+        {0x0100d2f00d5c0000, "1.5.0"},       // Nintendo Switch Sports
+        {0x0100a250097f0000, "01.50"},       // DRAGON BALL FighterZ
     };
     return table;
 }

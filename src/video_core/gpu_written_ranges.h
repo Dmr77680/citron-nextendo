@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 
@@ -18,9 +19,16 @@ public:
         if (size == 0) {
             return;
         }
+        // Grow-only: a plain load skips the locked RMW, since render targets are re-marked every draw.
         const u64 last = Chunk(addr + size - 1);
-        for (u64 chunk = Chunk(addr); chunk <= last; ++chunk) {
-            words[chunk >> 6].fetch_or(u64{1} << (chunk & 63), std::memory_order_release);
+        for (u64 chunk = Chunk(addr); chunk <= last;) {
+            const u64 word = chunk >> 6;
+            const u64 word_last = std::min(last, word * 64 + 63);
+            const u64 bits = (~u64{0} >> (63 - (word_last & 63))) & (~u64{0} << (chunk & 63));
+            if ((words[word].load(std::memory_order_relaxed) & bits) != bits) {
+                words[word].fetch_or(bits, std::memory_order_release);
+            }
+            chunk = word_last + 1;
         }
     }
 

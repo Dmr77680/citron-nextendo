@@ -129,11 +129,13 @@ protected:
 
     void EnsureCapacity(size_t required_entries);
     void HandleOverflow(bool keep_current_upload);
+    void AdvanceFrame();
 
     const Device& device;
     Scheduler& scheduler;
 
     size_t frame_index{0};
+    std::array<u64, FRAMES_IN_FLIGHT> frame_ticks{}; // tick of the last commands that read each slice
     DescriptorUpdateEntry* payload_cursor = nullptr;
     DescriptorUpdateEntry* payload_start = nullptr;
     const DescriptorUpdateEntry* upload_start = nullptr;

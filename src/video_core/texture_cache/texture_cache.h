@@ -253,31 +253,31 @@ void TextureCache<P>::CheckFeedbackLoop(std::span<const ImageViewInOut> views) {
     }
 
     const bool requires_barrier = [&] {
+        // Render target images resolved once per draw instead of once per bound texture.
+        std::array<ImageId, NUM_RT + 1> target_images;
+        size_t num_targets = 0;
+        for (const auto& ct_view_id : render_targets.color_buffer_ids) {
+            if (ct_view_id) {
+                target_images[num_targets++] = slot_image_views[ct_view_id].image_id;
+            }
+        }
+        if (render_targets.depth_buffer_id) {
+            target_images[num_targets++] = slot_image_views[render_targets.depth_buffer_id].image_id;
+        }
+        if (num_targets == 0) {
+            return false;
+        }
         for (const auto& view : views) {
             if (!view.id) {
                 continue;
             }
-            auto& image_view = slot_image_views[view.id];
-
-            // Check color targets
-            for (const auto& ct_view_id : render_targets.color_buffer_ids) {
-                if (ct_view_id) {
-                    auto& ct_view = slot_image_views[ct_view_id];
-                    if (image_view.image_id == ct_view.image_id) {
-                        return true;
-                    }
-                }
-            }
-
-            // Check zeta target
-            if (render_targets.depth_buffer_id) {
-                auto& zt_view = slot_image_views[render_targets.depth_buffer_id];
-                if (image_view.image_id == zt_view.image_id) {
+            const ImageId image_id = slot_image_views[view.id].image_id;
+            for (size_t i = 0; i < num_targets; ++i) {
+                if (image_id == target_images[i]) {
                     return true;
                 }
             }
         }
-
         return false;
     }();
 

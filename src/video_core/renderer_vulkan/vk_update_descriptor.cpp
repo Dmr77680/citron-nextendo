@@ -29,11 +29,7 @@ void UpdateDescriptorQueue::TickFrame() {
 
     total_entries_processed += GetCurrentSize();
 
-    if (++frame_index >= FRAMES_IN_FLIGHT) {
-        frame_index = 0;
-    }
-    payload_start = payload.get() + frame_index * FRAME_PAYLOAD_SIZE;
-    payload_cursor = payload_start;
+    AdvanceFrame();
 
     if (frame_index == 0 && overflow_events > 0) {
         LOG_DEBUG(Render_Vulkan, "Descriptor queue stats: {} entries processed, {} overflow events",
@@ -59,20 +55,31 @@ void UpdateDescriptorQueue::EnsureCapacity(size_t required_entries) {
     }
 }
 
+// Next ring slice; reused only once its readers' tick is done, instead of a worker stall per overflow.
+void UpdateDescriptorQueue::AdvanceFrame() {
+    frame_ticks[frame_index] = scheduler.CurrentTick();
+    if (++frame_index >= FRAMES_IN_FLIGHT) {
+        frame_index = 0;
+    }
+    if (!scheduler.IsFree(frame_ticks[frame_index])) {
+        scheduler.WaitWorker();
+    }
+    payload_start = payload.get() + frame_index * FRAME_PAYLOAD_SIZE;
+    payload_cursor = payload_start;
+}
+
 void UpdateDescriptorQueue::HandleOverflow(bool keep_current_upload) {
     overflow_count.fetch_add(1, std::memory_order_relaxed);
     overflow_events++;
 
-    LOG_WARNING(Render_Vulkan, "Descriptor payload overflow ({}), waiting for worker thread",
-                overflow_count.load(std::memory_order_relaxed));
-
-    scheduler.WaitWorker();
     // Mid-upload, the entries already written must stay contiguous with the rest of the upload.
     const bool has_pending = keep_current_upload && upload_start >= payload_start &&
                              upload_start <= payload_cursor;
+    const DescriptorUpdateEntry* const pending_start = upload_start;
     const size_t pending = has_pending ? static_cast<size_t>(payload_cursor - upload_start) : 0;
+    AdvanceFrame();
     if (pending != 0) {
-        std::memmove(payload_start, upload_start, pending * sizeof(DescriptorUpdateEntry));
+        std::memmove(payload_start, pending_start, pending * sizeof(DescriptorUpdateEntry));
     }
     payload_cursor = payload_start + pending;
     upload_start = payload_start;

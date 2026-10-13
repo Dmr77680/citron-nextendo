@@ -152,7 +152,8 @@ private:
             });
             ++set.binding;
             set.num_descriptors += descriptors[i].count;
-            shared_offset += sizeof(DescriptorUpdateEntry);
+            // The queue holds one entry per array element, so the next binding starts after all of them.
+            shared_offset += descriptors[i].count * sizeof(DescriptorUpdateEntry);
         }
     }
 
@@ -336,6 +337,8 @@ inline u64 HashDescriptorBlock(const DescriptorUpdateEntry* data, size_t entry_c
 struct BindlessCacheEntry {
     GPUVAddr key_addr{0};
     u32 key_count{0};
+    u32 key_handle_constant{0};
+    u32 key_handle_mask{~0U};
     u64 key_image_table_generation{};
     bool valid{false};
     boost::container::small_vector<VideoCommon::ImageViewInOut, 16> cached_views;
@@ -346,9 +349,11 @@ constexpr size_t BINDLESS_CACHE_SIZE = 16;
 using BindlessCache = std::array<BindlessCacheEntry, BINDLESS_CACHE_SIZE>;
 
 inline BindlessCacheEntry* FindBindlessEntry(BindlessCache& cache, GPUVAddr addr, u32 count,
+                                             u32 handle_constant, u32 handle_mask,
                                              u64 image_table_generation) {
     for (auto& entry : cache) {
         if (entry.valid && entry.key_addr == addr && entry.key_count == count &&
+            entry.key_handle_constant == handle_constant && entry.key_handle_mask == handle_mask &&
             entry.key_image_table_generation == image_table_generation) {
             return &entry;
         }
@@ -357,23 +362,27 @@ inline BindlessCacheEntry* FindBindlessEntry(BindlessCache& cache, GPUVAddr addr
 }
 
 inline BindlessCacheEntry& AcquireBindlessEntry(BindlessCache& cache, size_t& round_robin,
-                                                GPUVAddr addr, u32 count,
-                                                u64 image_table_generation) {
-    if (auto* found = FindBindlessEntry(cache, addr, count, image_table_generation)) {
+                                                GPUVAddr addr, u32 count, u32 handle_constant,
+                                                u32 handle_mask, u64 image_table_generation) {
+    if (auto* found = FindBindlessEntry(cache, addr, count, handle_constant, handle_mask,
+                                        image_table_generation)) {
         return *found;
     }
     auto& slot = cache[round_robin];
     round_robin = (round_robin + 1) % BINDLESS_CACHE_SIZE;
     slot.key_addr = addr;
     slot.key_count = count;
+    slot.key_handle_constant = handle_constant;
+    slot.key_handle_mask = handle_mask;
     slot.key_image_table_generation = image_table_generation;
     slot.valid = false;
     return slot;
 }
 inline BindlessCacheEntry& FindOrAcquireBindlessEntry(BindlessCache& cache, size_t& round_robin,
-                                                      GPUVAddr addr, u32 count,
-                                                      u64 image_table_generation) {
-    return AcquireBindlessEntry(cache, round_robin, addr, count, image_table_generation);
+                                                      GPUVAddr addr, u32 count, u32 handle_constant,
+                                                      u32 handle_mask, u64 image_table_generation) {
+    return AcquireBindlessEntry(cache, round_robin, addr, count, handle_constant, handle_mask,
+                                image_table_generation);
 }
 
 } // namespace Vulkan

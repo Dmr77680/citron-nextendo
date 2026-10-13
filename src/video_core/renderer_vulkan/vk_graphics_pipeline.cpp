@@ -392,6 +392,12 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
             const u32 index_offset{index << desc.size_shift};
             const u32 offset{desc.cbuf_offset + index_offset};
             const GPUVAddr addr{cbufs[desc.cbuf_index].address + offset};
+            u32 constant_bits{};
+            u32 mask{~0U};
+            if constexpr (std::is_same_v<decltype(desc), const Shader::TextureDescriptor&>) {
+                constant_bits = desc.handle_constant;
+                mask = desc.handle_mask;
+            }
             if constexpr (std::is_same_v<decltype(desc), const Shader::TextureDescriptor&> ||
                           std::is_same_v<decltype(desc), const Shader::TextureBufferDescriptor&>) {
                 if (desc.has_secondary) {
@@ -402,11 +408,12 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                     const u32 lhs_raw{gpu_memory->Read<u32>(addr) << desc.shift_left};
                     const u32 rhs_raw{gpu_memory->Read<u32>(separate_addr)
                                       << desc.secondary_shift_left};
-                    const u32 raw{lhs_raw | rhs_raw};
+                    const u32 raw{lhs_raw | rhs_raw | constant_bits};
                     return TexturePair(raw, via_header_index);
                 }
             }
-            return TexturePair(gpu_memory->Read<u32>(addr), via_header_index);
+            return TexturePair((gpu_memory->Read<u32>(addr) & mask) | constant_bits,
+                               via_header_index);
         }};
         const auto add_image{[&](const auto& desc, bool blacklist) LAMBDA_FORCEINLINE {
             for (u32 index = 0; index < desc.count; ++index) {
@@ -443,7 +450,7 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                 // no ReadBlockUnsafe is needed.
                 BindlessCacheEntry& entry = FindOrAcquireBindlessEntry(
                     bindless_cache, bindless_cache_rr, cbuf_addr, desc.count,
-                    image_table_generation);
+                    desc.handle_constant, desc.handle_mask, image_table_generation);
                 if (entry.valid) {
                     views.insert(views.end(), entry.cached_views.begin(),
                                  entry.cached_views.end());
@@ -464,7 +471,8 @@ void GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                     u32 raw;
                     std::memcpy(&raw, bindless_scratch.data() + slot_offset,
                                 sizeof(u32));
-                    const auto handle = TexturePair(raw, via_header_index);
+                    const auto handle = TexturePair((raw & desc.handle_mask) | desc.handle_constant,
+                                                    via_header_index);
                     views.push_back({handle.first});
                     samplers.push_back(handle.first == 0
                                            ? VideoCommon::NULL_SAMPLER_ID

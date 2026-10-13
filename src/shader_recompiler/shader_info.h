@@ -237,6 +237,8 @@ struct TextureDescriptor {
     u32 secondary_shift_left;
     u32 count;
     u32 size_shift;
+    u32 handle_constant{}; // immediate sampler bits ORed into the handle by the shader
+    u32 handle_mask{~0U};  // immediate mask applied to a single-cbuf handle before that OR
 
     auto operator<=>(const TextureDescriptor&) const = default;
 };

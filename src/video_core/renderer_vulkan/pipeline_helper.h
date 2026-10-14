@@ -3,10 +3,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <span>
+#include <vector>
 
 #include <boost/container/small_vector.hpp>
 
+#include "common/cityhash.h"
 #include "common/common_types.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/shader_info.h"
@@ -32,6 +36,11 @@ public:
 
     bool IsSplit() const noexcept {
         return split_mode;
+    }
+
+    std::span<const VkDescriptorUpdateTemplateEntry> UpdateEntries(size_t set_index) const {
+        const auto& entries = set_index == 0 ? uniform_set.entries : resource_set.entries;
+        return {entries.data(), entries.size()};
     }
 
     bool CanUsePushDescriptor() const noexcept {
@@ -233,7 +242,15 @@ class RescalingPushConstant {
 public:
     explicit RescalingPushConstant() noexcept {}
 
+    /// Textures past the scaling words have no rescaling bit (large bindless arrays).
+    bool TexturesFull() const noexcept {
+        return texture_ptr == words.data() + Shader::Backend::SPIRV::NUM_TEXTURE_SCALING_WORDS;
+    }
+
     void PushTexture(bool is_rescaled) noexcept {
+        if (TexturesFull()) {
+            return;
+        }
         *texture_ptr |= is_rescaled ? texture_bit : 0u;
         texture_bit <<= 1u;
         if (texture_bit == 0u) {
@@ -243,6 +260,9 @@ public:
     }
 
     void PushImage(bool is_rescaled) noexcept {
+        if (image_ptr == words.data() + words.size()) {
+            return;
+        }
         *image_ptr |= is_rescaled ? image_bit : 0u;
         image_bit <<= 1u;
         if (image_bit == 0u) {
@@ -269,16 +289,61 @@ public:
     std::array<f32, 4> words{};
 };
 
+/// Last descriptors resolved for one large texture array of a pipeline stage.
+struct TextureArrayMemo {
+    u64 image_table_generation{~u64{0}};
+    std::vector<VideoCommon::ImageViewId> view_ids;
+    std::vector<VideoCommon::SamplerId> sampler_ids;
+    std::vector<DescriptorUpdateEntry> payload;
+};
+
+/// Arrays this large are re-pushed from their memo when their views and samplers are unchanged.
+constexpr u32 TEXTURE_ARRAY_MEMO_MIN_COUNT = 64;
+
 inline void PushImageDescriptors(TextureCache& texture_cache,
                                  GuestDescriptorQueue& guest_descriptor_queue,
                                  const Shader::Info& info, RescalingPushConstant& rescaling,
                                  const VideoCommon::SamplerId*& samplers,
-                                 const VideoCommon::ImageViewInOut*& views) {
+                                 const VideoCommon::ImageViewInOut*& views,
+                                 std::vector<TextureArrayMemo>* memos = nullptr,
+                                 u64 image_table_generation = 0) {
     const u32 num_texture_buffers = Shader::NumDescriptors(info.texture_buffer_descriptors);
     const u32 num_image_buffers = Shader::NumDescriptors(info.image_buffer_descriptors);
     views += num_texture_buffers;
     views += num_image_buffers;
-    for (const auto& desc : info.texture_descriptors) {
+    for (size_t desc_index = 0; desc_index < info.texture_descriptors.size(); ++desc_index) {
+        const auto& desc = info.texture_descriptors[desc_index];
+        TextureArrayMemo* memo = nullptr;
+        if (memos && desc.count >= TEXTURE_ARRAY_MEMO_MIN_COUNT) {
+            if (memos->size() < info.texture_descriptors.size()) {
+                memos->resize(info.texture_descriptors.size());
+            }
+            memo = &(*memos)[desc_index];
+            // Image views are only freed with an image table generation bump, so equal ids still
+            // name the same Vulkan handles.
+            const bool hit =
+                memo->image_table_generation == image_table_generation &&
+                memo->payload.size() == desc.count &&
+                std::equal(views, views + desc.count, memo->view_ids.begin(),
+                           [](const auto& view, VideoCommon::ImageViewId id) {
+                               return view.id == id;
+                           }) &&
+                std::equal(samplers, samplers + desc.count, memo->sampler_ids.begin());
+            if (hit) {
+                guest_descriptor_queue.AddEntries(memo->payload);
+                for (u32 index = 0; index < desc.count && !rescaling.TexturesFull(); ++index) {
+                    rescaling.PushTexture(
+                        texture_cache.IsRescaling(texture_cache.GetImageView(views[index].id)));
+                }
+                views += desc.count;
+                samplers += desc.count;
+                continue;
+            }
+            memo->image_table_generation = image_table_generation;
+            memo->view_ids.clear();
+            memo->sampler_ids.clear();
+            memo->payload.clear();
+        }
         for (u32 index = 0; index < desc.count; ++index) {
             const VideoCommon::ImageViewId image_view_id{(views++)->id};
             const VideoCommon::SamplerId sampler_id{*(samplers++)};
@@ -297,7 +362,18 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
             const VkSampler vk_sampler{use_fallback_sampler ? sampler.HandleWithDefaultAnisotropy()
                                                             : sampler.Handle()};
             guest_descriptor_queue.AddSampledImage(vk_image_view, vk_sampler);
-            rescaling.PushTexture(texture_cache.IsRescaling(image_view));
+            if (memo) {
+                memo->view_ids.push_back(image_view_id);
+                memo->sampler_ids.push_back(sampler_id);
+                memo->payload.push_back(VkDescriptorImageInfo{
+                    .sampler = vk_sampler,
+                    .imageView = vk_image_view,
+                    .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+                });
+            }
+            if (!rescaling.TexturesFull()) {
+                rescaling.PushTexture(texture_cache.IsRescaling(image_view));
+            }
         }
     }
     for (const auto& desc : info.image_descriptors) {
@@ -324,14 +400,28 @@ inline u64 HashDescriptorBlock(const DescriptorUpdateEntry* data, size_t entry_c
     if (entry_count == 0 || data == nullptr) {
         return FNV1A_OFFSET;
     }
-    const size_t word_count = entry_count * (sizeof(DescriptorUpdateEntry) / sizeof(u64));
-    const u64* words = reinterpret_cast<const u64*>(data);
-    u64 h = FNV1A_OFFSET;
-    for (size_t i = 0; i < word_count; ++i) {
-        h ^= words[i];
-        h *= FNV1A_PRIME;
+    // Large bindless arrays contain thousands of entries. A serial FNV multiply
+    // for every word stalls the descriptor worker even when the set is reused.
+    // This key is transient (not persisted), so use the existing bulk hash.
+    return Common::CityHash64(reinterpret_cast<const char*>(data),
+                              entry_count * sizeof(DescriptorUpdateEntry));
+}
+
+// Hash only the payload ranges consumed by this set's update template. Uniforms and
+// resources share the upload block, but changing a uniform must not invalidate an
+// otherwise identical resource set (especially large bindless texture arrays).
+inline u64 HashDescriptorSet(
+    const DescriptorUpdateEntry* data,
+    std::span<const VkDescriptorUpdateTemplateEntry> entries) noexcept {
+    u64 hash = FNV1A_OFFSET;
+    for (const auto& entry : entries) {
+        ASSERT(entry.stride == sizeof(DescriptorUpdateEntry));
+        ASSERT(entry.offset % sizeof(DescriptorUpdateEntry) == 0);
+        hash ^= HashDescriptorBlock(data + entry.offset / sizeof(DescriptorUpdateEntry),
+                                    entry.descriptorCount);
+        hash *= FNV1A_PRIME;
     }
-    return h;
+    return hash;
 }
 
 struct BindlessCacheEntry {

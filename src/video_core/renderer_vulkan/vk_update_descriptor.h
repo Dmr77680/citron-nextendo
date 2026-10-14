@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -87,6 +88,11 @@ public:
                 .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
             };
         }
+    }
+
+    void AddEntries(std::span<const DescriptorUpdateEntry> entries) {
+        EnsureCapacity(entries.size());
+        payload_cursor = std::copy(entries.begin(), entries.end(), payload_cursor);
     }
 
     void AddBuffers(std::span<const VkBuffer> buffers, VkDeviceSize offset, VkDeviceSize size) {

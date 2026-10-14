@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <span>
 #include <string_view>
 
@@ -247,9 +248,26 @@ std::vector<u8> ApplyOne(std::vector<u8> nso, std::span<const u8> ips_bytes, siz
 } // namespace
 
 std::vector<u8> ApplyIfMatch(const std::array<u8, 0x20>& build_id, std::vector<u8> nso,
-                             std::string_view module_name) {
+                             std::string_view module_name, u64 title_id) {
     const auto build_id_raw = Common::HexToString(build_id);
     const auto build_id_hex = build_id_raw.substr(0, build_id_raw.find_last_not_of('0') + 1);
+
+    // US direct launches lack the collection launcher's -lan argument. The game's
+    // fallback is Japanese (6), but US RomFS only contains the MLG sound bank.
+    // Default to English (0) only for this verified US build; explicit languages
+    // still follow the existing parser. Offsets include the 0x100-byte NSO header.
+    if (title_id == 0x010099801C4FA000ULL && module_name == "main" &&
+        build_id_hex == "BCA1A793E41A4836EF3C03286B18E816EEC62338") {
+        constexpr size_t offset = 0x5F998;
+        constexpr std::array<u8, 4> expected{0xD4, 0x00, 0x80, 0x52};
+        if (nso.size() >= offset + expected.size() &&
+            std::equal(expected.begin(), expected.end(), nso.begin() + offset)) {
+            nso[offset] = 0x14; // mov w20, #6 -> mov w20, #0
+            LOG_INFO(Loader, "[Nextendo] Peace Walker US: direct-launch language fallback applied");
+        } else {
+            LOG_ERROR(Loader, "[Nextendo] Peace Walker US: unexpected startup instruction; patch skipped");
+        }
+    }
 
     for (const auto& known : kKnownBuilds) {
         if (build_id_hex != known.build_id_hex) {

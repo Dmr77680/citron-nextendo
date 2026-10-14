@@ -206,11 +206,12 @@ std::optional<VAddr> AppLoader_NSO::LoadModule(Kernel::KProcess& process, Core::
     // mod patches exist, and must never go through the mod-patch path at all, since Splatoon 3
     // refuses to boot with any mod enabled (see main.cpp) and these patches need to survive that
     // ban rather than be blocked by it.
-    constexpr std::array<u64, 12> kNplnPatchableTitles{{
+    constexpr std::array<u64, 13> kNplnPatchableTitles{{
         0x0100C2500FC20000ULL, // Splatoon 3
         0x010015100B514000ULL, // Super Mario Bros. Wonder
         0x0100C9A00ECE6000ULL, // Nintendo 64 - Nintendo Classics
-        0x0100C6F01C4F8000ULL, // METAL GEAR SOLID: Peace Walker - Master Collection Version
+        0x0100C6F01C4F8000ULL, // METAL GEAR SOLID: Peace Walker - Master Collection Version (JP)
+        0x010099801C4FA000ULL, // METAL GEAR SOLID: Peace Walker - Master Collection Version (US)
         0x0100F9F00C696000ULL, // Crash Team Racing Nitro-Fueled
         0x01006FD0080B2000ULL, // Overcooked! 2
         0x0100A3D008C5C000ULL, // Pokémon Scarlet
@@ -230,7 +231,7 @@ std::optional<VAddr> AppLoader_NSO::LoadModule(Kernel::KProcess& process, Core::
                     patchable_section.size());
 
         pi_header = Loader::NextendoS3Patches::ApplyIfMatch(nso_header.build_id,
-                                                            std::move(pi_header), name);
+                                                            std::move(pi_header), name, pm->GetTitleID());
 
         if (pi_header.size() >= sizeof(NSOHeader) &&
             pi_header.size() - sizeof(NSOHeader) == patchable_section.size()) {

@@ -35,6 +35,7 @@
 
 #ifdef ENABLE_WEB_SERVICE
 #include "web_service/nextendo_api.h"
+#include "web_service/npln_patch_catalog.h"
 #endif
 
 NextendoController::NextendoController(Core::System& system_, QWidget* main_window_,
@@ -42,6 +43,7 @@ NextendoController::NextendoController(Core::System& system_, QWidget* main_wind
     : QObject(parent), system(system_), main_window(main_window_),
       game_invites(new NextendoGameInvites(system_, this)) {
 #ifdef ENABLE_WEB_SERVICE
+    WebService::NplnPatchCatalog::StartTitleIndexCheck();
     Common::NextendoFriends::SetNameResolver(&WebService::NextendoApi::GetNameByPid);
 #endif
     friend_poll_timer.setInterval(20000);

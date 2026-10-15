@@ -146,6 +146,14 @@ static std::optional<std::string> GetNextendoRedirectIp(const std::string& host,
         return server_ip;
     }
 
+    // Friday the 13th logs in to IllFonic's own REST backend right after NEX Register.
+    constexpr u64 FridayThe13th = 0x010092A00C4B6000ULL;
+    if (program_id == FridayThe13th && host == "nswitch.f13.illfonic.com") {
+        LOG_INFO(Service, "[Nextendo] Redirecting Friday the 13th backend '{}' -> '{}'", host,
+                 server_ip);
+        return server_ip;
+    }
+
     if (host.starts_with("nncs2-") && host.ends_with(".n.n.srv.nintendo.net")) {
         LOG_INFO(Service, "[Nextendo] Redirecting NAT check host '{}' -> '{}'", host, nat_ip);
         return nat_ip;
@@ -825,24 +833,55 @@ void SFDNSRES::GetAddrInfoRequestRaw(HLERequestContext& ctx) {
     rb.Push<u32>(0); // data_size
 }
 
-// Stubs for functions from original registration table not in Switchbrew sfdnsres
+// Numeric getnameinfo: Unreal's FInternetAddr::ToString returns "" when this fails, leaving P2P joins
+// with no host to connect to. Buffers: in 0 = sockaddr, out 0 = host, out 1 = service.
+static GetAddrInfoError GetNameInfoImpl(HLERequestContext& ctx) {
+    const auto addr_buffer = ctx.ReadBuffer(0);
+    if (addr_buffer.size() < sizeof(SockAddrIn)) {
+        return GetAddrInfoError::FAIL;
+    }
+    SockAddrIn addr{};
+    std::memcpy(&addr, addr_buffer.data(), sizeof(addr));
+    if (addr.family != static_cast<u8>(Domain::INET)) {
+        return GetAddrInfoError::FAMILY;
+    }
+
+    const std::string host = Network::IPv4AddressToString(addr.ip);
+    const std::string service = std::to_string(Common::swap16(addr.portno));
+    LOG_DEBUG(Service, "GetNameInfo {}:{}", host, service);
+
+    const std::size_t host_size = ctx.CanWriteBuffer(0) ? ctx.GetWriteBufferSize(0) : 0;
+    const std::size_t service_size = ctx.CanWriteBuffer(1) ? ctx.GetWriteBufferSize(1) : 0;
+    if ((host_size != 0 && host.size() >= host_size) ||
+        (service_size != 0 && service.size() >= service_size)) {
+        return GetAddrInfoError::OVERFLOW_;
+    }
+    if (host_size != 0) {
+        ctx.WriteBuffer(host.c_str(), host.size() + 1, 0);
+    }
+    if (service_size != 0) {
+        ctx.WriteBuffer(service.c_str(), service.size() + 1, 1);
+    }
+    return GetAddrInfoError::SUCCESS;
+}
+
 void SFDNSRES::GetNameInfoRequest(HLERequestContext& ctx) {
-    LOG_WARNING(Service, "(STUBBED) sfdnsres::GetNameInfoRequest called");
-    IPC::ResponseBuilder rb{ctx, 5}; // Similar to GetAddrInfoRequest
+    const GetAddrInfoError gai_error = GetNameInfoImpl(ctx);
+
+    IPC::ResponseBuilder rb{ctx, 4};
     rb.Push(ResultSuccess);
-    rb.PushEnum(static_cast<Errno>(EOPNOTSUPP));
-    rb.PushEnum(GetAddrInfoError::AGAIN); // Changed from INTERNAL to AGAIN
-    rb.Push<u32>(0);
+    rb.PushEnum(gai_error);
+    rb.PushEnum(GetAddrInfoErrorToErrno(gai_error));
 }
 
 void SFDNSRES::GetNameInfoRequestWithOptions(HLERequestContext& ctx) {
-    LOG_WARNING(Service, "(STUBBED) sfdnsres::GetNameInfoRequestWithOptions called");
-    IPC::ResponseBuilder rb{ctx, 6}; // Similar to GetAddrInfoRequestWithOptions
+    const GetAddrInfoError gai_error = GetNameInfoImpl(ctx);
+
+    IPC::ResponseBuilder rb{ctx, 5};
     rb.Push(ResultSuccess);
-    rb.Push<u32>(0); // data_size
-    rb.PushEnum(GetAddrInfoError::AGAIN); // Changed from INTERNAL to AGAIN
-    rb.PushEnum(NetDbError::Internal);    // This should be fine as NetDbError::Internal is defined
-    rb.PushEnum(static_cast<Errno>(EOPNOTSUPP));
+    rb.PushEnum(gai_error);
+    rb.PushEnum(GetAddrInfoErrorToNetDbError(gai_error));
+    rb.PushEnum(GetAddrInfoErrorToErrno(gai_error));
 }
 
 } // namespace Service::Sockets

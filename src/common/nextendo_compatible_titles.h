@@ -53,6 +53,7 @@ inline const std::unordered_map<u64, std::string>& Table() {
         {0x0100d2f00d5c0000, "1.5.0"},       // Nintendo Switch Sports
         {0x0100a250097f0000, "01.50"},       // DRAGON BALL FighterZ
         {0x0100b04011742000, "16.0.2"},      // MONSTER HUNTER RISE
+        {0x01000bf0152fa000, "1.1.1"},       // Zombie Army 4: Dead War
     };
     return table;
 }

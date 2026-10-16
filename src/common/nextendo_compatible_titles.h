@@ -43,6 +43,8 @@ inline const std::unordered_map<u64, std::string>& Table() {
         {0x01008f6008c5e000, "4.0.0"}, // Pokémon Violet
         {0x0100a3d008c5c000, "4.0.0"}, // Pokémon Scarlet
         {0x0100f43008c44000, "2.0.2"}, // Pokémon Legends: Z-A
+        {0x0100abf008968000, "1.3.2"}, // Pokémon Sword
+        {0x01008db008c2c000, "1.3.2"}, // Pokémon Shield
         {0x0100c9a00ece6000, "4.2.0"}, // Nintendo 64 - Nintendo Classics
         {0x010019401051c000, "1.3.2"}, // Mario Strikers: Battle League
         {0x0100f9f00c696000, "1.0.15"},      // Crash Team Racing Nitro-Fueled

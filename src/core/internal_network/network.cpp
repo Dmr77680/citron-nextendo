@@ -132,6 +132,8 @@ Errno TranslateNativeError(int e, CallType call_type = CallType::Other) {
         return Errno::SUCCESS;
     case WSAEBADF:
         return Errno::BADF;
+    case WSAEADDRINUSE:
+        return Errno::ADDRINUSE;
     case WSAEINVAL:
         return Errno::INVAL;
     case WSAEMFILE:
@@ -291,6 +293,8 @@ Errno TranslateNativeError(int e, CallType call_type = CallType::Other) {
         return Errno::SUCCESS;
     case EBADF:
         return Errno::BADF;
+    case EADDRINUSE:
+        return Errno::ADDRINUSE;
     case EINVAL:
         return Errno::INVAL;
     case EMFILE:

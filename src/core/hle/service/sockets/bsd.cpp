@@ -25,6 +25,7 @@
 #include "common/nextendo_nat.h"
 #include "common/settings.h"
 #include "common/socket_types.h"
+#include "common/swap.h"
 #include "core/arm/debug.h"
 #include "core/core.h"
 #include "core/hle/kernel/k_event.h"
@@ -86,9 +87,12 @@ static void StartDrain(ParkedUdpDrain& drain, std::shared_ptr<Network::SocketBas
             std::vector<u8> buffer(2048);
             Network::SockAddrIn addr{};
             const auto [ret, err] = socket->RecvFrom(0, buffer, &addr);
-            if (ret <= 0) {
-                // Timeout (nothing arrived this poll) or the socket genuinely died — either
-                // way, loop back and check `stop` again rather than spinning on an error.
+            if (err != Network::Errno::SUCCESS || ret < 0) {
+                if (err != Network::Errno::AGAIN && err != Network::Errno::TIMEDOUT) {
+                    break;
+                }
+                // A parked nonblocking socket may return AGAIN immediately.
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
             buffer.resize(static_cast<size_t>(ret));
@@ -1701,10 +1705,13 @@ Errno BSD::BindImpl(s32 fd, std::span<const u8> addr) {
             }
             return Errno::SUCCESS;
         }
-        descriptor.bound_port = addr_in.portno;
     }
 
     const auto result = Translate(file_descriptors[fd]->socket->Bind(Translate(addr_in)));
+    if (result == Errno::SUCCESS && descriptor.type == Network::Type::DGRAM) {
+        // Only successfully bound sockets may be parked and adopted on a later bind.
+        descriptor.bound_port = addr_in.portno;
+    }
     if (result != Errno::SUCCESS) {
         LOG_ERROR(Service, "Bind fd={} failed with errno={}", fd, static_cast<int>(result));
     }
@@ -2471,8 +2478,16 @@ Errno BSD::CloseImpl(s32 fd) {
         file_descriptors[fd].reset();
     }
 
+    const auto program_id = system.GetApplicationProcessProgramID();
+    // Sword/Shield closes its local Y-Comm listener when transitioning online.
+    // Retaining that fixed port prevents another instance from initializing Y-Comm.
+    const bool is_swsh_local_listener =
+        (program_id == 0x0100ABF008968000ULL || program_id == 0x01008DB008C2C000ULL) &&
+        bound_port == Common::swap16(u16{12345});
+
     // Connected means one peer, so closing it is a real teardown, not the probe/play port swap.
-    if (is_udp && bound_port > 0 && !was_connected && !was_shut_down) {
+    if (is_udp && bound_port > 0 && !was_connected && !was_shut_down &&
+        !is_swsh_local_listener) {
         if (ParkUdpSocket(socket_to_close, bound_port)) {
             LOG_INFO(Service, "[Nextendo] Parking UDP socket fd={} bound to port {}", fd,
                      bound_port);

@@ -20,6 +20,8 @@ Errno Translate(Network::Errno value) {
         return Errno::BADF;
     case Network::Errno::AGAIN:
         return Errno::AGAIN;
+    case Network::Errno::ADDRINUSE:
+        return Errno::ADDRINUSE;
     case Network::Errno::INVAL:
         return Errno::INVAL;
     case Network::Errno::MFILE:

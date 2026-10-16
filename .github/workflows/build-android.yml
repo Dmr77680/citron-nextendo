@@ -2,6 +2,8 @@ name: Build Citron (Android)
 
 on:
   workflow_dispatch:
+  push:  # CITRON_AUTOBUILD
+    branches: [main]
 
 jobs:
   check-version:

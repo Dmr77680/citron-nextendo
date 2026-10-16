@@ -28,6 +28,8 @@ class System;
 namespace Network {
 class SocketBase;
 class Socket;
+struct PollFD;
+enum class Errno;
 } // namespace Network
 
 namespace Service::Sockets {
@@ -235,6 +237,9 @@ private:
     std::pair<s32, Errno> SocketImpl(Domain domain, Type type, Protocol protocol);
     std::pair<s32, Errno> PollImpl(std::vector<u8>& write_buffer, std::span<const u8> read_buffer,
                                    s32 nfds, s32 timeout);
+    std::pair<s32, Network::Errno> SelectWait(
+        std::vector<Network::PollFD>& host_pollfds, const std::vector<s32>& polled_fds,
+        const std::vector<std::shared_ptr<Network::SocketBase>>& held_sockets, s32 timeout);
     // [Nextendo] True if any fd in this poll's set was created by EventFd(). See Poll()'s
     // definition and sockets.h's SetBsdDeferralEvent declaration comment.
     bool PollSetIncludesEventFd(std::span<const u8> read_buffer, s32 nfds) const;

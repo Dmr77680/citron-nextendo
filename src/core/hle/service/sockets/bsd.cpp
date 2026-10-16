@@ -10,6 +10,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string_view>
@@ -650,7 +651,15 @@ void BSD::Socket(HLERequestContext& ctx) {
 void BSD::Select(HLERequestContext& ctx) {
     IPC::RequestParser rp{ctx};
     const s32 nfds = rp.Pop<s32>();
-    const s32 timeout = rp.Pop<s32>();
+    // nn::socket::Select sends {s64 tv_sec, s64 tv_usec, bool is_null} 8-byte aligned after nfds.
+    rp.Skip(1, false);
+    const s64 tv_sec = rp.Pop<s64>();
+    const s64 tv_usec = rp.Pop<s64>();
+    const bool no_timeout = rp.Pop<bool>();
+    const s32 timeout =
+        no_timeout ? -1
+                   : static_cast<s32>(std::clamp<s64>(tv_sec * 1000 + (tv_usec + 999) / 1000, 0,
+                                                      std::numeric_limits<s32>::max()));
 
     LOG_DEBUG(Service, "called. nfds={} timeout={}", nfds, timeout);
 
@@ -1285,6 +1294,73 @@ bool BSD::PollSetIncludesEventFd(std::span<const u8> read_buffer, s32 nfds) cons
     return false;
 }
 
+// Like FreeBSD, a socket closed by another thread fails the select with EBADF, reported one timeout after the close so the closer is done with it (F13 private lobbies).
+std::pair<s32, Network::Errno> BSD::SelectWait(
+    std::vector<Network::PollFD>& host_pollfds, const std::vector<s32>& polled_fds,
+    const std::vector<std::shared_ptr<Network::SocketBase>>& held_sockets, s32 timeout) {
+    using Clock = std::chrono::steady_clock;
+    auto deadline = Clock::now() + std::chrono::milliseconds(std::max(timeout, 0));
+    std::vector<bool> closed(host_pollfds.size(), false);
+    bool any_closed = false;
+
+    const auto closed_by_other_thread = [&](size_t j) {
+        std::lock_guard lock(fd_table_mutex);
+        const auto& descriptor = file_descriptors[polled_fds[j]];
+        return !descriptor || descriptor->socket != held_sockets[j];
+    };
+
+    while (true) {
+        std::vector<Network::PollFD> live;
+        std::vector<size_t> live_index;
+        for (size_t j = 0; j < host_pollfds.size(); ++j) {
+            host_pollfds[j].revents = Network::PollEvents{};
+            if (!closed[j]) {
+                live.push_back(host_pollfds[j]);
+                live_index.push_back(j);
+            }
+        }
+
+        s32 remaining = timeout;
+        if (timeout > 0) {
+            remaining = static_cast<s32>(std::max<s64>(
+                0, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now())
+                       .count()));
+        }
+        if (live.empty()) {
+            if (remaining > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(remaining));
+            }
+            return {-1, Network::Errno::BADF};
+        }
+
+        auto result = Network::Poll(live, remaining);
+
+        bool newly_closed = false;
+        bool live_event = false;
+        for (size_t k = 0; k < live.size(); ++k) {
+            const size_t j = live_index[k];
+            if (closed_by_other_thread(j)) {
+                closed[j] = true;
+                newly_closed = true;
+                continue;
+            }
+            host_pollfds[j].revents = live[k].revents;
+            live_event |= live[k].revents != Network::PollEvents{};
+        }
+        if (newly_closed && !any_closed && timeout > 0) {
+            deadline = Clock::now() + std::chrono::milliseconds(timeout);
+        }
+        any_closed |= newly_closed;
+
+        if (!any_closed) {
+            return result;
+        }
+        if (live_event || timeout <= 0 || Clock::now() >= deadline) {
+            return {-1, Network::Errno::BADF};
+        }
+    }
+}
+
 std::pair<s32, Errno> BSD::PollImpl(std::vector<u8>& write_buffer, std::span<const u8> read_buffer,
                                     s32 nfds, s32 timeout) {
     if (nfds <= 0) {
@@ -1494,22 +1570,28 @@ std::pair<s32, Errno> BSD::SelectImpl(s32 nfds, s32 timeout, std::span<const u8>
 
     std::vector<s32> polled_fds;
     std::vector<Network::PollFD> host_pollfds;
+    std::vector<std::shared_ptr<Network::SocketBase>> held_sockets;
     polled_fds.reserve(entries.size());
     host_pollfds.reserve(entries.size());
-    for (const Entry& entry : entries) {
-        if (entry.fd < 0 || entry.fd >= static_cast<s32>(MAX_FD) || !file_descriptors[entry.fd] ||
-            !file_descriptors[entry.fd]->socket) {
-            continue;
+    {
+        std::lock_guard lock(fd_table_mutex);
+        for (const Entry& entry : entries) {
+            if (entry.fd < 0 || entry.fd >= static_cast<s32>(MAX_FD) ||
+                !file_descriptors[entry.fd] || !file_descriptors[entry.fd]->socket) {
+                continue;
+            }
+            polled_fds.push_back(entry.fd);
+            held_sockets.push_back(file_descriptors[entry.fd]->socket);
+            host_pollfds.push_back(Network::PollFD{
+                .socket = file_descriptors[entry.fd]->socket.get(),
+                .events = entry.requested,
+                .revents = Network::PollEvents{},
+            });
         }
-        polled_fds.push_back(entry.fd);
-        host_pollfds.push_back(Network::PollFD{
-            .socket = file_descriptors[entry.fd]->socket.get(),
-            .events = entry.requested,
-            .revents = Network::PollEvents{},
-        });
     }
 
-    const auto [poll_ret, poll_errno] = Translate(Network::Poll(host_pollfds, timeout));
+    const auto [poll_ret, poll_errno] =
+        Translate(SelectWait(host_pollfds, polled_fds, held_sockets, timeout));
     if (poll_errno != Errno::SUCCESS) {
         return {poll_ret, poll_errno};
     }

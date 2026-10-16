@@ -95,6 +95,9 @@ jobs:
         id: get_hash
         run: echo "git_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Full vcpkg history  # CITRON_VCPKG_FULL
+        run: git -C externals/vcpkg fetch --unshallow --quiet || true
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

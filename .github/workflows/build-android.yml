@@ -145,7 +145,7 @@ jobs:
   build-android-8elite:
     name: Build Android APK (Snapdragon 8 Elite)
     needs: [check-version]
-    if: needs.check-version.outputs.should_build == 'true'
+    if: false  # CITRON_NO8ELITE
     runs-on: ubuntu-latest
     outputs:
       git_hash: ${{ steps.get_hash.outputs.git_hash }}
@@ -269,7 +269,7 @@ jobs:
 
   release-android:
     name: "Release Android Nightly"
-    needs: [check-version, build-android, build-android-8elite]
+    needs: [check-version, build-android]
     if: needs.check-version.outputs.should_build == 'true'
     permissions:
       contents: write

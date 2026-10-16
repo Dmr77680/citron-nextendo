@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <array>
+#include <atomic>
 #include <cstring>
 
 #include "common/hex_util.h"
@@ -290,6 +291,14 @@ private:
         out_data->resize(actual_size);
         LOG_DEBUG(Service_SSL, "Read {} bytes: {}", actual_size,
                   Common::HexToString(*out_data, false));
+        { // CITRON_WSLOG
+            static std::atomic<u32> n_rd{0};
+            if (actual_size > 0 && ++n_rd <= 600) {
+                LOG_INFO(Service_SSL, "[Nextendo] WS in  conn={} size={}: {}",
+                         static_cast<const void*>(this), actual_size,
+                         Common::HexToString(*out_data, false));
+            }
+        }
         return res;
     }
 
@@ -306,6 +315,14 @@ private:
         }
         LOG_DEBUG(Service_SSL, "Write {} bytes, res={}: {}", *out_size, res.raw,
                   Common::HexToString(send_data.subspan(0, send_data.size()), false));
+        { // CITRON_WSLOG
+            static std::atomic<u32> n_wr{0};
+            if (++n_wr <= 600) {
+                LOG_INFO(Service_SSL, "[Nextendo] WS out conn={} size={}: {}",
+                         static_cast<const void*>(this), send_data.size(),
+                         Common::HexToString(send_data, false));
+            }
+        }
         return res;
     }
 
